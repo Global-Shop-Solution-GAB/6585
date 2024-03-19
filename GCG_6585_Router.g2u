@@ -1,0 +1,472 @@
+﻿Program.Sub.ScreenSU.Start
+Gui.Form..Create(BaseForm)
+Gui.Form..Caption("Form")
+Gui.Form..Size(400,125)
+Gui.Form..MinX(0)
+Gui.Form..MinY(0)
+Gui.Form..Position(0,0)
+Gui.Form..AlwaysOnTop(False)
+Gui.Form..FontName("Tahoma")
+Gui.Form..FontSize(8.25)
+Gui.Form..ControlBox(True)
+Gui.Form..MaxButton(True)
+Gui.Form..MinButton(True)
+Gui.Form..MousePointer(0)
+Gui.Form..Moveable(True)
+Gui.Form..Sizeable(True)
+Gui.Form..ShowInTaskBar(True)
+Gui.Form..TitleBar(True)
+Gui.Form..Event(UnLoad,Form_UnLoad)
+Gui.Form.txtPriority.Create(TextBox,"",True,54,20,0,21,31,True,1,"Tahoma",8.25,,1)
+Gui.Form.txtPriority.NumericOnly(2)
+Gui.Form.txtPriority.MaxLength(3)
+Gui.Form.lbl1.Create(Label,"Priority",True,34,13,0,22,15,True,0,"Tahoma",8.25,,0,0)
+Gui.Form.lbl1.BorderStyle(0)
+Gui.Form.lbl2.Create(Label,"Setup Scrap",True,58,13,0,86,15,True,0,"Tahoma",8.25,,0,0)
+Gui.Form.lbl2.BorderStyle(0)
+Gui.Form.txtSetupScrap.Create(TextBox,"",True,103,20,0,82,31,True,1,"Tahoma",8.25,,1)
+Gui.Form.txtSetupScrap.NumericOnly(1)
+Gui.Form.txtSetupScrap.MaxLength(13)
+Gui.Form.lbl3.Create(Label,"Run Scrap",True,49,13,0,194,15,True,0,"Tahoma",8.25,,0,0)
+Gui.Form.lbl3.BorderStyle(0)
+Gui.Form.txtRunScrap.Create(TextBox,"",True,100,20,0,192,31,True,1,"Tahoma",8.25,,1)
+Gui.Form.txtRunScrap.NumericOnly(1)
+Gui.Form.txtRunScrap.MaxLength(13)
+Gui.Form.cmdSave.Create(Button)
+Gui.Form.cmdSave.Enabled(True)
+Gui.Form.cmdSave.Visible(True)
+Gui.Form.cmdSave.Zorder(0)
+Gui.Form.cmdSave.Size(54,23)
+Gui.Form.cmdSave.Position(21,63)
+Gui.Form.cmdSave.Caption("Save")
+Gui.Form.cmdSave.FontName("Tahoma")
+Gui.Form.cmdSave.FontSize(8.25)
+Gui.Form.cmdSave.SvgPicture("icon_save_color")
+Gui.Form.cmdSave.Event(Click,cmdSave_Click)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+v.Global.sPart.Declare
+v.Global.sToPart.Declare
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'BN, Jan 19 2022
+'Customer: Krypton
+'Kryton needs additional information to be stored at the Router level. The additional info will be stored at a Part/Rev basis and will help changing Priorities levels, Run Quantities on the WO. 
+'1. a GAB form launched from the Router Header Script 3 button will allow the user to input custom values at a router level used when scheduling the WO.
+	'The new screen will have the following fields available (additional fields could be needed in the future) and the title of the screen should include the router number and rev.
+	' Priority Level – Default to empty string/Validate value as numeric, maximum 3 digit (999)
+	' Setup Scrap – Default to zero/Validate value as numeric.
+	' Run Scrap – Default to zero/Validate as numeric.
+	
+'2. Custom Fields applied at WO Creation: Single level and Bom level
+
+'2.1 The new priority field will be used when a new work order is entered and saved the first time. When a new work order is entered, if there is a value entered in the priority field on the router, the custom Priority value is entered into the priority value on the work order. If there is not a value enter on the WO, the company default (currently 50) is entered on the work order (the current functionality).	
+'WO
+'	blank		custom 55  => 55
+'	blank		custom blank => 50 as default
+'	
+'	54		custom 55 => 55
+'	54		custom blank => 54
+
+
+'2.2 The 2 new scrap fields will be used when a new work order is entered and saved the first time. When a new work order is entered and save is clicked the first time, increase the Run Qty of the work order by the setup scrap and run scrap from the router level. For BOM parts, each child will need to be increased by the scrap values entered on their respected routers. The scrap quantities for the child work orders also need to cascade downward. If a tier 1 part calls for 50, with a scrap of 4, then the run quantity is 54. If a child of that part has a scrap quantity of 3, then you need to take the run quantity from the parent, then multiply by the BOM quantity, then add in the scrap quantity of 3. Example if BOM Quantity is 2: Parent 50, Tier 1 = 54, X BOM Qty 2 = 108 + scrap of 3. Run Qty is 111.	
+
+'Hook ID to setup this project:
+'ID       
+'=========
+'000011010
+'000011140
+'000011151
+'000016650
+'000017261
+
+Function.Intrinsic.UI.UsePixels 
+f.Intrinsic.Control.Try
+	v.Local.sTitle.Declare
+	v.Local.sSQL.Declare
+	v.Local.sRet.Declare
+	v.Local.sPriority.Declare
+	v.Local.sCustomPriority.Declare
+	v.Local.sFinalPriority.Declare
+	v.Local.sSetupScrap.Declare
+	v.Local.sRunScrap.Declare
+	v.Local.fSetupScrap.Declare
+	v.Local.fRunScrap.Declare
+	v.Local.sPump.Declare
+	v.Local.sHold.Declare
+		
+	
+	'Estimating / Routing & Quote Management > File > Estimating/Standard Routers > Open/New
+	f.Intrinsic.Control.If(v.Caller.Hook,=,11010)
+		Variable.Passed.000203.Set("Qty Factor")		
+	f.Intrinsic.Control.ElseIf(v.Caller.Hook,=,11140)
+		'Variable.Passed.000014: Router number (17 chars)
+		'Variable.Passed.000015: Router rev (3 chars)
+		f.Intrinsic.Control.If(Variable.Passed.000014.Trim,=,"")
+			f.Intrinsic.UI.Msgbox("Please enter a router number.","Attention")
+			f.Intrinsic.Control.CallSub("Unload")
+		f.Intrinsic.Control.EndIf
+		
+		f.Intrinsic.String.GSSPartString(v.Passed.000014,v.Passed.000015,v.Global.sPart)
+		f.Intrinsic.String.Build("Part: {0} Rev: {1}",v.Passed.000014,v.Passed.000015,v.Local.sTitle)
+		gui.Form..Caption(v.Local.sTitle)
+		
+		f.Intrinsic.Control.CallSub(GetPart)
+		gui.Form..Show
+	
+	'Estimating / Routing & Quote Management > File > Estimating/Standard Routers > Copy
+	f.Intrinsic.Control.ElseIf(v.Caller.Hook,=,11151)	
+		'Variable.Passed.000003: from Router
+		'Variable.Passed.000004: from Rev
+		'Variable.Passed.000006: to Router
+		'Variable.Passed.000007: to Rev		
+		f.Intrinsic.String.GSSPartString(v.Passed.000003,v.Passed.000004,v.Global.sPart)
+		f.Intrinsic.String.GSSPartString(v.Passed.000006,v.Passed.000007,v.Global.sToPart)
+		f.Intrinsic.String.Build("Select Top 1 Priority,SetupScrap,RunScrap from GCG_6585_Parts where Part = '{0}'",v.Global.sPart.PSQLFriendly,v.Local.sSQL)		
+		f.ODBC.Connection!conx.OpenCompanyConnection
+		f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+		f.Intrinsic.Control.If(v.Ambient.ExecuteAndReturnEOF)
+			'No custom data for From Part, so propagate to To Part
+			f.Intrinsic.String.Build("Delete from GCG_6585_Parts where Part = '{0}'",v.Global.sToPart.PSQLFriendly,v.Local.sSQL)
+			
+		f.Intrinsic.Control.Else
+			f.Intrinsic.String.Split(v.Local.sRet,"*!*",v.Local.sRet)
+			v.Local.sPriority.Set(v.Local.sRet(0))
+			v.Local.sSetupScrap.Set(v.Local.sRet(1))
+			v.Local.sRunScrap.Set(v.Local.sRet(2))			
+			'Check if To Part data exists
+			f.Intrinsic.String.Build("Select Top 1 Part from GCG_6585_Parts where Part = '{0}'",v.Global.sToPart,v.Local.sSQL)	
+			f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+			f.Intrinsic.Control.If(v.Ambient.ExecuteAndReturnEOF)	
+				'Insert
+				f.Intrinsic.String.Build("Insert into GCG_6585_Parts (Part,Priority,SetupScrap,RunScrap) values('{0}', '{1}', '{2}','{3}')",v.Global.sToPart.PSQLFriendly,v.Local.sPriority,v.Local.sSetupScrap,v.Local.sRunScrap,v.Local.sSQL)				
+			f.Intrinsic.Control.Else
+				'Update
+				f.Intrinsic.String.Build("Update GCG_6585_Parts set Priority = '{0}', SetupScrap = '{1}', RunScrap = '{2}' where Part = '{3}'",v.Local.sPriority,v.Local.sSetupScrap,v.Local.sRunScrap,v.Global.sToPart,v.Local.sSQL)
+			f.Intrinsic.Control.EndIf
+						
+		f.Intrinsic.Control.EndIf
+		f.ODBC.Connection!conx.Execute(v.Local.sSQL)		
+		f.ODBC.Connection!conx.Close		
+		
+	'Verify and change priority and pump the Run Qty at Shop Floor Control > File > Work Orders > New - Single Level - Pre-Save hook
+	'Make sure it is Single Level and New with the switch = "N S"
+	f.Intrinsic.Control.ElseIf(v.Caller.Hook,=,16650)	
+		f.Intrinsic.Control.If(v.Caller.Switches,=,"N S",or,v.Caller.Switches,=,"S")		
+		
+		'Variable.Passed.000003: Job 	Variable.Passed.000004: Suffix	Variable.Passed.000006: Router	Variable.Passed.000007: Router Rev	
+		'Variable.Passed.000043: Run Qty		
+		F.Intrinsic.String.Build("Please wait for changing Run Qty and Priority for WO: {0}-{1}",v.Passed.000003,v.Passed.000004,v.Local.sHold)
+		f.Intrinsic.UI.InvokeWaitDialog(v.Local.sHold)
+		f.Intrinsic.String.GSSPartString(v.Passed.000006,v.Passed.000007,v.Global.sPart)
+		f.Intrinsic.String.Build("Select Top 1 Priority,SetupScrap,RunScrap from GCG_6585_Parts where Part = '{0}'",v.Global.sPart.PSQLFriendly,v.Local.sSQL)		
+		f.ODBC.Connection!conx.OpenCompanyConnection
+		f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+		f.Intrinsic.Control.If(v.Ambient.ExecuteAndReturnEOF.Not)	
+			f.Intrinsic.String.Split(v.Local.sRet,"*!*",v.Local.sRet)
+			f.Intrinsic.String.LPad(v.Passed.000022,"0",3,v.Local.sPriority)
+			v.Local.sCustomPriority.Set(v.Local.sRet(0))
+			v.Local.fSetupScrap.Set(v.Local.sRet(1))
+			v.Local.fRunScrap.Set(v.Local.sRet(2))	
+			f.Intrinsic.Control.If(v.Local.sPriority.Trim,<>,"000",and,v.Local.sCustomPriority,<>,"")
+				v.Local.sFinalPriority.Set(v.Local.sCustomPriority)
+			f.Intrinsic.Control.ElseIf(v.Local.sPriority.Trim,<>,"000",and,v.Local.sCustomPriority,=,"")	
+				v.Local.sFinalPriority.Set(v.Local.sPriority)
+			f.Intrinsic.Control.ElseIf(v.Local.sPriority.Trim,=,"000",and,v.Local.sCustomPriority,<>,"")
+				v.Local.sFinalPriority.Set(v.Local.sCustomPriority)
+			f.Intrinsic.Control.ElseIf(v.Local.sPriority.Trim,=,"000",and,v.Local.sCustomPriority,=,"")
+				v.Local.sFinalPriority.Set("050")
+			f.Intrinsic.Control.EndIf
+			f.Intrinsic.String.LPad(v.Local.sFinalPriority,"0",3,v.Local.sFinalPriority)				
+			v.Passed.000022.Set(v.Local.sFinalPriority)
+			f.Intrinsic.Math.Add(v.Local.fSetupScrap,v.Local.fRunScrap,v.Local.sPump)
+			f.Intrinsic.Math.Add(v.Local.sPump,v.Passed.000043,v.Local.sPump)
+			f.Intrinsic.String.Format(v.Local.sPump,"0.0000",v.Local.sPump)
+			v.Passed.000043.Set(v.Local.sPump)			
+		f.Intrinsic.Control.EndIf
+		f.ODBC.Connection!conx.Close
+		f.Intrinsic.UI.CloseWaitDialog
+		
+	f.Intrinsic.Control.EndIf	
+	
+	'Verify and change priority and pump the Run Qty at Shop Floor Control > File > Work Orders > New - Bom Level 
+	'This hook also fires when at Shop Floor Control > File > Reschedule Bill of Material so needs to check where it comes from
+	'Make sure it is BOM Level and New with the switch = "N B"
+	f.Intrinsic.Control.ElseIf(v.Caller.Hook,=,17261)	
+	
+		f.Intrinsic.Control.If(v.Caller.Switches,=,"N B",or,v.Caller.Switches,=,"E")	
+		
+		'v.Passed.009000: Job 		v.Passed.009001: Suffix
+		F.Intrinsic.String.Build("Please wait for changing Run Qty and Priority for WO: {0}-{1}",v.Passed.009000,v.Passed.009001,v.Local.sHold)
+		f.Intrinsic.UI.InvokeWaitDialog(v.Local.sHold)		
+		f.Intrinsic.Control.CallSub(ProcessBomWO)
+		f.Intrinsic.UI.CloseWaitDialog
+		f.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.ElseIf(v.Caller.Switches,=,"INI")
+		'Initialize
+		f.Intrinsic.Control.CallSub(CheckTable)		
+	f.Intrinsic.Control.EndIf	
+
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub("Catching","sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.Catching.Start
+f.Intrinsic.Control.Try
+	v.Local.sMsg.Declare
+	v.Local.sPath.Declare
+	v.Local.sTitle.Declare
+	v.Local.sRet.Declare
+	v.Local.bEx.Declare
+	v.Local.sFile.Declare
+	v.Local.sScript.Declare
+	
+	f.Intrinsic.String.Build("{0}\GCG_6565_Router.g2u",v.Ambient.ScriptPath,v.Local.sPath)
+	
+	f.Intrinsic.String.Build("Path: {1}{0}Sub: {2}{0}Error: {3}",v.Ambient.NewLine,v.Local.sPath,v.Args.Sub,v.Args.ErrorDesc,v.Local.sMsg)
+	f.Intrinsic.String.Build("GAB Error Number {0}",v.Args.errorno,v.Local.sTitle)
+	f.Intrinsic.UI.Msgbox(v.Local.sMsg,v.Local.sTitle)
+
+	F.Intrinsic.Control.CallSub("Unload")
+	
+f.Intrinsic.Control.Catch
+	f.Intrinsic.UI.Msgbox(v.Ambient.ErrorDescription)
+	F.Intrinsic.Control.CallSub("Unload")
+f.Intrinsic.Control.EndTry
+Program.Sub.Catching.End
+
+Program.Sub.Unload.Start
+f.Intrinsic.Control.Try
+
+	f.Intrinsic.Control.If(v.ODBC.conx.Exists)
+		f.ODBC.Connection!conx.Close
+	f.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.End
+	
+f.Intrinsic.Control.Catch
+	f.Intrinsic.UI.Msgbox(v.Ambient.ErrorDescription)
+	f.Intrinsic.Control.End
+f.Intrinsic.Control.EndTry
+Program.Sub.Unload.End
+
+Program.Sub.Form_UnLoad.Start
+f.Intrinsic.Control.CallSub(Unload)
+Program.Sub.Form_UnLoad.End
+
+Program.Sub.GetPart.Start
+f.Intrinsic.Control.Try
+	v.Local.sSQL.Declare
+	v.Local.sRet.Declare
+	
+	f.Intrinsic.String.Build("Select Top 1 Priority,SetupScrap,RunScrap from GCG_6585_Parts where Part = '{0}'",v.Global.sPart.PSQLFriendly,v.Local.sSQL)
+	f.ODBC.Connection!conx.OpenCompanyConnection
+	f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+	f.ODBC.Connection!conx.Close
+	f.Intrinsic.Control.If(v.Ambient.ExecuteAndReturnEOF.Not)
+		f.Intrinsic.String.Split(v.Local.sRet,"*!*",v.Local.sRet)
+		f.Intrinsic.Control.If(v.Local.sRet(0).Trim,<>,"")	
+			gui.Form.txtPriority.Text(v.Local.sRet(0))
+		f.Intrinsic.Control.Else
+			gui.Form.txtPriority.Text("")
+		f.Intrinsic.Control.EndIf
+		gui.Form.txtSetupScrap.Text(v.Local.sRet(1))
+		gui.Form.txtRunScrap.Text(v.Local.sRet(2))
+	f.Intrinsic.Control.EndIf	
+	
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub("Catching","sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.GetPart.End
+
+Program.Sub.CheckTable.Start
+f.Intrinsic.Control.Try
+	v.Local.sSQL.Declare
+	v.Local.bEx.Declare
+	
+	f.ODBC.Connection!conx.OpenCompanyConnection
+	F.ODBC.Connection!conx.TableExists("GCG_6585_Parts",V.Local.bEx)
+	F.Intrinsic.Control.If(V.Local.bEx.Not)
+		F.ODBC.Connection!Conx.Execute("CREATE TABLE GCG_6585_Parts (PART CHAR(20),Priority VarChar(3),SetupScrap NUMERIC(12,4),RunScrap NUMERIC(12,4));")
+	F.Intrinsic.Control.EndIf	
+	f.ODBC.Connection!conx.Close
+
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub("Catching","sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.CheckTable.End
+
+Program.Sub.cmdSave_Click.Start
+f.Intrinsic.Control.Try
+	v.Local.sSQL.Declare
+	v.Local.bEx.Declare
+	v.Local.sPriority.Declare
+	v.Local.fSetupScrap.Declare
+	v.Local.fRunScrap.Declare
+	v.Local.bNumeric.Declare
+	v.Local.sSetupScrap.Declare
+	v.Local.sRunScrap.Declare
+	v.Local.sRet.Declare
+	
+	'Validate
+	v.Local.sPriority.Set(v.Screen.Form!txtPriority.Text.Trim)
+	v.Local.fSetupScrap.Set(v.Screen.Form!txtSetupScrap.Text.Trim)
+	v.Local.fRunScrap.Set(v.Screen.Form!txtRunScrap.Text.Trim)
+	f.Intrinsic.Control.If(v.Local.fSetupScrap,<,0,or,v.Local.fSetupScrap,>,99999999.9999)
+		f.Intrinsic.UI.Msgbox("Setup Scrap must be from 0 to 99999999.9999.","Invalid input")
+		f.Intrinsic.Control.ExitSub
+	f.Intrinsic.Control.EndIf		
+	f.Intrinsic.Control.If(v.Local.fRunScrap,<,0,or,v.Local.fRunScrap,>,99999999.9999)
+		f.Intrinsic.UI.Msgbox("Run Scrap must be from 0 to 99999999.9999.","Invalid input")
+		f.Intrinsic.Control.ExitSub
+	f.Intrinsic.Control.EndIf
+	f.Intrinsic.UI.InvokeWaitDialog("Saving...")
+	f.Intrinsic.String.Format(v.Local.fSetupScrap,"0.0000",v.Local.sSetupScrap)
+	f.Intrinsic.String.Format(v.Local.fRunScrap,"0.0000",v.Local.sRunScrap)
+	f.Intrinsic.String.Build("Select Top 1 Part from GCG_6585_Parts where Part = '{0}'",v.Global.sPart.PSQLFriendly,v.Local.sSQL)		
+	f.ODBC.Connection!conx.OpenCompanyConnection
+	f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+	f.Intrinsic.Control.If(v.Ambient.ExecuteAndReturnEOF.Not)
+		f.Intrinsic.String.Build("Update GCG_6585_Parts set Priority = '{0}', SetupScrap = '{1}', RunScrap = '{2}' where Part = '{3}'",v.Local.sPriority,v.Local.sSetupScrap,v.Local.sRunScrap,v.Global.sPart.PSQLFriendly,v.Local.sSQL)
+	f.Intrinsic.Control.Else
+		f.Intrinsic.String.Build("Insert into GCG_6585_Parts (Part,Priority,SetupScrap,RunScrap) values('{0}', '{1}', '{2}','{3}')",v.Global.sPart.PSQLFriendly,v.Local.sPriority,v.Local.sSetupScrap,v.Local.sRunScrap,v.Local.sSQL)
+	f.Intrinsic.Control.EndIf
+	f.ODBC.Connection!conx.Execute(v.Local.sSQL)		
+	f.ODBC.Connection!conx.Close
+	gui.Form.txtSetupScrap.Text(v.Local.sSetupScrap)
+	gui.Form.txtRunScrap.Text(v.Local.sRunScrap)
+	f.Intrinsic.UI.CloseWaitDialog
+
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub("Catching","sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.cmdSave_Click.End
+
+Program.Sub.ProcessBomWO.Start
+f.Intrinsic.Control.Try
+	v.Local.sSql.Declare
+	v.Local.sRet.Declare
+	v.Local.sPriority.Declare
+	v.Local.fSetupScrap.Declare
+	v.Local.fRunScrap.Declare
+	v.Local.sPump.Declare
+	v.Local.sHold.Declare	
+	v.Local.sParentWOQty.Declare
+	v.Local.sParentBomQtyFactor.Declare
+	v.Local.sQtyScaled.Declare
+	v.Local.sCustomPriority.Declare
+	v.Local.sFinalPriority.Declare
+	v.Local.sRouter.Declare
+	v.Local.sPart.Declare
+	
+	F.ODBC.Connection!conx.OpenCompanyConnection
+	
+	'Get information of the current job
+	f.Intrinsic.String.Build("Select Top 1 Part,router,date_due,Qty_Order,PARENT_WO,PARENT_Suffix_Parent,Priority from v_job_header where job = '{0}' and suffix = '{1}' ",v.Passed.009000,v.Passed.009001,v.Local.sSql)
+	f.Intrinsic.Control.If(v.DataTable.Job.Exists)
+		f.Data.DataTable.Close("Job")
+	f.Intrinsic.Control.EndIf	
+	f.Data.Datatable.CreateFromSQL("Job","conx",v.Local.sSql,True)
+
+	f.Intrinsic.Control.If(v.DataTable.Job.RowCount,>,0)
+	
+		'Check if there is Router custom data
+		v.Local.sRouter.Set(V.DataTable.Job(0).Router!FIELDVAL)
+		f.Intrinsic.String.Build("Select Top 1 Priority,SetupScrap,RunScrap from GCG_6585_Parts where Part = '{0}'",v.Local.sRouter.PSQLFriendly,v.Local.sSQL)		
+		f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+		v.Local.sPriority.Set(V.DataTable.Job(0).Priority!FIELDVAL)
+		
+		'1/Yes, there is router custom data
+		f.Intrinsic.Control.If(v.Ambient.ExecuteAndReturnEOF.Not)	
+			f.Intrinsic.String.Split(v.Local.sRet,"*!*",v.Local.sRet)			
+			v.Local.fSetupScrap.Set(v.Local.sRet(1))
+			v.Local.fRunScrap.Set(v.Local.sRet(2))	
+			v.Local.sCustomPriority.Set(v.Local.sRet(0))
+			f.Intrinsic.Control.If(v.Local.sPriority.Trim,<>,"000",and,v.Local.sCustomPriority,<>,"")
+				v.Local.sFinalPriority.Set(v.Local.sCustomPriority)
+			f.Intrinsic.Control.ElseIf(v.Local.sPriority.Trim,<>,"000",and,v.Local.sCustomPriority,=,"")	
+				v.Local.sFinalPriority.Set(v.Local.sPriority)
+			f.Intrinsic.Control.ElseIf(v.Local.sPriority.Trim,=,"000",and,v.Local.sCustomPriority,<>,"")
+				v.Local.sFinalPriority.Set(v.Local.sCustomPriority)
+			f.Intrinsic.Control.ElseIf(v.Local.sPriority.Trim,=,"000",and,v.Local.sCustomPriority,=,"")
+				v.Local.sFinalPriority.Set("050")
+			f.Intrinsic.Control.EndIf
+			f.Intrinsic.String.LPad(v.Local.sFinalPriority,"0",3,v.Local.sFinalPriority)			
+			
+			f.Intrinsic.Math.Add(v.Local.fSetupScrap,v.Local.fRunScrap,v.Local.sPump)
+			
+			'Check if it has a parent and the parent has the same WO number
+			v.Local.sPart.Set(V.DataTable.Job(0).Part!FIELDVAL)
+			f.Intrinsic.String.Build("Select Top 1 quantity from  Bom_mstr where part = '{0}' and PARENT  <> PART and parent in (Select Part from v_Job_Header where Job = '{1}' and Suffix = '{2}')",v.Local.sPart.PSQLFriendly,V.DataTable.Job(0).PARENT_WO!FIELDVAL,V.DataTable.Job(0).PARENT_Suffix_Parent!FIELDVAL,v.Local.sSql)
+			f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+			
+			'1.1/It has a Bom Parent with qty AND it has a parent WO. This section is for a child WO and it has Router custom data
+			f.Intrinsic.Control.If(v.Ambient.ExecuteAndReturnEOF.Not)
+				v.Local.sParentBomQtyFactor.Set(v.Local.sRet)
+				f.Intrinsic.String.Build("Select Qty_Order from V_Job_header where Job = '{0}' and Suffix = '{1}'",V.DataTable.Job(0).PARENT_WO!FIELDVAL,V.DataTable.Job(0).PARENT_Suffix_Parent!FIELDVAL,v.Local.sSql)
+				f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+				f.Intrinsic.Control.If(v.Ambient.ExecuteAndReturnEOF.Not)
+					v.Local.sParentWOQty.Set(v.Local.sRet)
+					f.Intrinsic.Math.Mult(v.Local.sParentBomQtyFactor,v.Local.sParentWOQty,v.Local.sQtyScaled)
+					f.Intrinsic.Math.Add(v.Local.sQtyScaled,v.Local.sPump,v.Local.sPump)
+					F.Intrinsic.String.Build("UPDATE JOB_HEADER SET qty_order = '{0}',Qty_Customer = '{4}',Priority = '{3}' where JOB = '{1}' and SUFFIX = '{2}'",v.Local.sPump,v.Passed.009000,v.Passed.009001,v.Local.sFinalPriority,v.Local.sQtyScaled,V.Local.sSql)
+					F.ODBC.Connection!conx.Execute(v.Local.sSql)
+					f.Global.APS.ScheduleJob(v.Passed.009000,v.Passed.009001,"B",V.DataTable.Job(0).DATE_DUE!FIELDVAL)			
+				'Parent WO Qty retrieving fails for some reason, just pump the quantity of the child. This case is rare for bad data case
+				f.Intrinsic.Control.Else
+					f.Intrinsic.Math.Add(V.DataTable.Job(0).Qty_Order!FIELDVAL,v.Local.sPump,v.Local.sPump)
+					F.Intrinsic.String.Build("UPDATE JOB_HEADER SET qty_order = '{0}',Qty_Customer = '{4}',Priority = '{3}' where JOB = '{1}' and SUFFIX = '{2}'",v.Local.sPump,v.Passed.009000,v.Passed.009001,v.Local.sFinalPriority,v.Local.sQtyScaled,V.Local.sSql)
+					F.ODBC.Connection!conx.Execute(v.Local.sSql)	
+					f.Global.APS.ScheduleJob(v.Passed.009000,v.Passed.009001,"B",V.DataTable.Job(0).DATE_DUE!FIELDVAL)		
+				f.Intrinsic.Control.EndIf
+				
+			'1.2/it does not have a Bom quantity factor for any reason. For example, it can be a parent WO itself. Just pump the quantity
+			f.Intrinsic.Control.Else
+				f.Intrinsic.Math.Add(V.DataTable.Job(0).Qty_Order!FIELDVAL,v.Local.sPump,v.Local.sPump)
+				F.Intrinsic.String.Build("UPDATE JOB_HEADER SET qty_order = '{0}',Qty_Customer = '{0}',Priority = '{3}' where JOB = '{1}' and SUFFIX = '{2}'",v.Local.sPump,v.Passed.009000,v.Passed.009001,v.Local.sFinalPriority,V.Local.sSql)
+				F.ODBC.Connection!conx.Execute(v.Local.sSql)	
+				f.Global.APS.ScheduleJob(v.Passed.009000,v.Passed.009001,"B",V.DataTable.Job(0).DATE_DUE!FIELDVAL)					
+			f.Intrinsic.Control.EndIf
+		
+		'2/No, there is no router custom data
+		f.Intrinsic.Control.Else
+			'Check if it has a parent AND the parent has the same WO number
+			v.Local.sPart.Set(V.DataTable.Job(0).Part!FIELDVAL)
+			f.Intrinsic.String.Build("Select Top 1 quantity from  Bom_mstr where part = '{0}' and PARENT  <> PART and parent in (Select Part from v_Job_Header where Job = '{1}' and Suffix = '{2}')",v.Local.sPart.PSQLFriendly,V.DataTable.Job(0).PARENT_WO!FIELDVAL,V.DataTable.Job(0).PARENT_Suffix_Parent!FIELDVAL,v.Local.sSql)
+			f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+			'It has a Bom Parent with qty and the Parent Job is the for the Parent.
+			'This is for a child WO being scaled by a Parent WO
+			f.Intrinsic.Control.If(v.Ambient.ExecuteAndReturnEOF.Not)
+				v.Local.sParentBomQtyFactor.Set(v.Local.sRet)
+				'Get Parent WO Qty
+				f.Intrinsic.String.Build("Select Top 1 Qty_Order from V_Job_header where Job = '{0}' and Suffix = '{1}'",V.DataTable.Job(0).PARENT_WO!FIELDVAL,V.DataTable.Job(0).PARENT_Suffix_Parent!FIELDVAL,v.Local.sSql)
+				f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+				f.Intrinsic.Control.If(v.Ambient.ExecuteAndReturnEOF.Not)
+					v.Local.sParentWOQty.Set(v.Local.sRet)
+					f.Intrinsic.Math.Mult(v.Local.sParentBomQtyFactor,v.Local.sParentWOQty,v.Local.sQtyScaled)
+					F.Intrinsic.String.Build("UPDATE JOB_HEADER SET qty_order = '{0}',Qty_Customer = '{0}' where JOB = '{1}' and SUFFIX = '{2}'",v.Local.sQtyScaled,v.Passed.009000,v.Passed.009001,V.Local.sSql)
+					F.ODBC.Connection!conx.Execute(v.Local.sSql)
+					f.Global.APS.ScheduleJob(v.Passed.009000,v.Passed.009001,"B",V.DataTable.Job(0).DATE_DUE!FIELDVAL)	
+				'If there is no parent WO quantity retrieved for some reason, it will do nothing, so don't need an Else statement				
+				f.Intrinsic.Control.EndIf
+				
+			'If it does not have a Bom quantity factor for 1 of the 2 reasons: Bom qty factor or not in a Parent WO, just do nothing, so does not need an Else statment here
+			f.Intrinsic.Control.EndIf
+		f.Intrinsic.Control.EndIf		
+
+	'End if of successful retrieving current WO
+	f.Intrinsic.Control.EndIf
+	
+	f.ODBC.Connection!conx.Close
+	
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub("Catching","sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.ProcessBomWO.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8649.24509$}$1
+${$6$}$bnguyen$}$20230927155139184$}$tqzwddZCkmoVRWHEL6DZymEEseDhOdziKEoDNvVkg1EWPZDlKtGmzM4VESYeMGTCDhpQlyhgLzw=
+Program.Sub.Comments.End
