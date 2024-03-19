@@ -1,0 +1,1 @@
+CREATE TABLE GCG_6585_Parts (PART CHAR(20),Priority VarChar(3),SetupScrap NUMERIC(12,4),RunScrap NUMERIC(12,4));
